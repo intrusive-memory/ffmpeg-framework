@@ -47,7 +47,7 @@ jobs:
           key: ${{ runner.os }}-ffmpeg-${{ env.FFMPEG_REF }}
 
       - name: Build XCFrameworks
-        run: Scripts/build-ffmpeg.sh --ffmpeg-ref "$FFMPEG_REF"
+        run: Scripts/build-ffmpeg.sh --platform macos --ffmpeg-ref "$FFMPEG_REF"
 
       - name: Archive XCFrameworks
         run: |

@@ -4,6 +4,9 @@ This package wraps the FFmpeg project in a Swift Package Manager compatible
 layout. The build tooling fetches FFmpeg from the official GitHub repository,
 compiles the constituent static libraries for the Apple platforms supported by
 SwiftPM, and emits XCFramework bundles that can be shipped as binary targets.
+The current GitHub Actions configuration focuses on delivering a macOS
+Apple Silicon (`arm64`) build, which is the only variant produced by the
+automated pipeline.
 
 ## Repository layout
 
@@ -33,6 +36,9 @@ runners.
 # Build FFmpeg for all supported Apple platforms and package the XCFrameworks.
 Scripts/build-ffmpeg.sh
 
+# Build the macOS Apple Silicon variant that matches the CI pipeline.
+Scripts/build-ffmpeg.sh --platform macos
+
 # Build a specific platform only (e.g. iOS simulator).
 Scripts/build-ffmpeg.sh --platform ios-simulator
 
@@ -51,8 +57,8 @@ invocations, and release publication. It performs the following steps:
 
 1. Selects the Xcode 16.4 toolchain to match local builds.
 2. Installs the Homebrew dependencies required by FFmpeg.
-3. Runs `Scripts/build-ffmpeg.sh` (optionally with a custom FFmpeg ref when
-   triggered manually).
+3. Runs `Scripts/build-ffmpeg.sh --platform macos` (optionally with a custom
+   FFmpeg ref when triggered manually) to produce a macOS Apple Silicon build.
 4. Archives the XCFramework directory, computes SwiftPM checksums for each
    bundle, and uploads the results as workflow artifacts.
 5. On release events, attaches the generated archives and checksum files to the

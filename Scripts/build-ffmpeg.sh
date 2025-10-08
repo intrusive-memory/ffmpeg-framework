@@ -57,7 +57,7 @@ platform_sdk() {
 
 platform_archs() {
   case "$1" in
-    macos) echo "arm64 x86_64" ;;
+    macos) echo "arm64" ;;
     ios) echo "arm64" ;;
     ios-simulator) echo "arm64 x86_64" ;;
     tvos) echo "arm64" ;;
