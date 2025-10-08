@@ -1,0 +1,6 @@
+# Build outputs
+build/
+Artifacts/
+
+# macOS clutter
+.DS_Store

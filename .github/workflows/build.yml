@@ -1,0 +1,113 @@
+name: Build FFmpeg XCFrameworks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ffmpeg-ref:
+        description: "FFmpeg git ref or tag to build"
+        required: false
+        default: "n7.0"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and package FFmpeg
+    runs-on: macos-15
+    env:
+      FFMPEG_REF: ${{ github.event.inputs.ffmpeg-ref || 'n7.0' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+
+      - name: Show toolchain details
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install build dependencies
+        run: |
+          brew update
+          brew install nasm yasm pkg-config automake cmake ninja meson || true
+
+      - name: Restore FFmpeg source cache
+        uses: actions/cache@v4
+        with:
+          path: build/_sources/ffmpeg
+          key: ${{ runner.os }}-ffmpeg-${{ env.FFMPEG_REF }}
+
+      - name: Build XCFrameworks
+        run: Scripts/build-ffmpeg.sh --ffmpeg-ref "$FFMPEG_REF"
+
+      - name: Archive XCFrameworks
+        run: |
+          mkdir -p build/artifacts
+          tar -czf build/artifacts/ffmpeg-xcframeworks.tar.gz -C Artifacts/xcframeworks .
+
+      - name: Upload XCFrameworks
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-xcframeworks
+          path: build/artifacts/ffmpeg-xcframeworks.tar.gz
+
+      - name: Generate SwiftPM checksums
+        run: |
+          mkdir -p build/checksums
+          shopt -s nullglob
+          frameworks=(Artifacts/xcframeworks/*.xcframework)
+          if [ ${#frameworks[@]} -eq 0 ]; then
+            echo 'error: no XCFrameworks found in Artifacts/xcframeworks' >&2
+            exit 1
+          fi
+          for framework in "${frameworks[@]}"; do
+            base=$(basename "$framework")
+            zip_path="build/artifacts/${base}.zip"
+            ditto -c -k --sequesterRsrc --keepParent "$framework" "$zip_path"
+            checksum=$(swift package compute-checksum "$zip_path")
+            echo "${base}: ${checksum}" | tee "build/checksums/${base}.checksum"
+          done
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-xcframework-checksums
+          path: build/checksums/*.checksum
+
+  publish:
+    name: Publish release artifacts
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: macos-15
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-xcframeworks
+          path: publish
+
+      - name: Download checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-xcframework-checksums
+          path: publish
+
+      - name: Create release assets
+        run: |
+          ls -R publish
+
+      - name: Upload to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            publish/ffmpeg-xcframeworks.tar.gz
+            publish/*.checksum
