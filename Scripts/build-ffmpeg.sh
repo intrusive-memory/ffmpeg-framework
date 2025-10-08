@@ -218,8 +218,11 @@ build_platform() {
   for arch in "${archs[@]}"; do
     local log_file="${LOG_DIR}/configure-${platform}-${arch}.log"
     echo "Building FFmpeg for ${platform} (${arch})"
-    build_arch "${platform}" "${arch}" > >(tee "${log_file}") 2>&1
-    built_any=1
+    if build_arch "${platform}" "${arch}" > >(tee "${log_file}") 2>&1; then
+      built_any=1
+    else
+      echo "warning: failed to build ${platform} (${arch}); see ${log_file} for details" >&2
+    fi
   done
 
   if [[ ${built_any} -eq 1 ]]; then
