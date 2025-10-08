@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-IFS=$'\n\t'
+# Preserve the default word-splitting behavior (space, tab, newline) to ensure
+# that array expansions using space-delimited values continue to work while the
+# script still opts in to bash's strict error handling modes.
+IFS=$' \n\t'
 
 # This script builds FFmpeg static libraries across all supported Apple
 # platforms and emits XCFramework bundles that can be consumed from SwiftPM.
