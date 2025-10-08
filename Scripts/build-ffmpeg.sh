@@ -30,6 +30,7 @@ ALL_PLATFORMS=(
 )
 
 ORDERED_PLATFORMS=()
+BUILT_PLATFORMS=()
 
 platform_min_version() {
   case "$1" in
@@ -65,6 +66,16 @@ platform_archs() {
     visionos-simulator) echo "arm64" ;;
     *) return 1 ;;
   esac
+}
+
+platform_has_sdk() {
+  local platform="$1"
+  local sdk
+  sdk="$(platform_sdk "${platform}")" || return 1
+  if ! xcrun --sdk "${sdk}" --show-sdk-path >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
 }
 
 is_supported_platform() {
@@ -172,7 +183,13 @@ build_arch() {
     --sysroot="${sysroot}" \
     --enable-pic
 
-  make -j"$(sysctl -n hw.logicalcpu)"
+  local cpu_count
+  cpu_count="$(sysctl -n hw.logicalcpu 2>/dev/null || true)"
+  if [[ -z "${cpu_count}" ]]; then
+    cpu_count=1
+  fi
+
+  make -j"${cpu_count}"
   make install
 
   popd >/dev/null
@@ -182,6 +199,14 @@ build_platform() {
   local platform="$1"
   local archs_string
   local archs=()
+  local built_any=0
+
+  if ! platform_has_sdk "${platform}"; then
+    local sdk
+    sdk="$(platform_sdk "${platform}")" || sdk="unknown"
+    echo "warning: skipping ${platform} because SDK '${sdk}' is not available" >&2
+    return 1
+  fi
 
   archs_string="$(platform_archs "${platform}")" || {
     echo "warning: no architectures defined for platform '${platform}'" >&2
@@ -194,13 +219,18 @@ build_platform() {
     local log_file="${LOG_DIR}/configure-${platform}-${arch}.log"
     echo "Building FFmpeg for ${platform} (${arch})"
     build_arch "${platform}" "${arch}" > >(tee "${log_file}") 2>&1
+    built_any=1
   done
+
+  if [[ ${built_any} -eq 1 ]]; then
+    BUILT_PLATFORMS+=("${platform}")
+  fi
 }
 
 package_library() {
   local library="$1"
   local args=()
-  for platform in "${ORDERED_PLATFORMS[@]}"; do
+  for platform in "${BUILT_PLATFORMS[@]}"; do
     local archs_string
     local archs=()
 
@@ -305,8 +335,13 @@ main() {
   clone_ffmpeg
 
   for platform in "${ORDERED_PLATFORMS[@]}"; do
-    build_platform "${platform}"
+    build_platform "${platform}" || true
   done
+
+  if [[ ${#BUILT_PLATFORMS[@]} -eq 0 ]]; then
+    echo "error: no platforms were built successfully" >&2
+    exit 1
+  fi
 
   if [[ ${skip_package} -eq 0 ]]; then
     package_libraries
