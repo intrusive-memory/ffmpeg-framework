@@ -4,5 +4,5 @@
 import PackageDescription
 
 let package = Package(
-    name: "FFMpeg-framework"
+    name: "ffmpeg-framework"
 )
