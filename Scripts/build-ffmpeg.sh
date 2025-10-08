@@ -18,38 +18,64 @@ FFMPEG_REPO="${FFMPEG_REPO:-https://github.com/FFmpeg/FFmpeg.git}"
 FFMPEG_REF="${FFMPEG_REF:-n7.0}" # Latest stable tagged release at the time of writing.
 FFMPEG_LIBRARIES=(avcodec avdevice avfilter avformat avutil postproc swresample swscale)
 
-# Deployment targets per platform (matching modern Apple OS support).
-declare -A PLATFORM_MIN_VERSIONS=(
-  [macos]=11.0
-  [ios]=13.0
-  [ios-simulator]=13.0
-  [tvos]=13.0
-  [tvos-simulator]=13.0
-  [visionos]=1.0
-  [visionos-simulator]=1.0
+# Ordered list of supported platform identifiers.
+ALL_PLATFORMS=(
+  macos
+  ios
+  ios-simulator
+  tvos
+  tvos-simulator
+  visionos
+  visionos-simulator
 )
 
-# SDK identifiers consumed by xcrun.
-declare -A PLATFORM_SDKS=(
-  [macos]=macosx
-  [ios]=iphoneos
-  [ios-simulator]=iphonesimulator
-  [tvos]=appletvos
-  [tvos-simulator]=appletvsimulator
-  [visionos]=xros
-  [visionos-simulator]=xrssimulator
-)
+ORDERED_PLATFORMS=()
 
-# Architectures to build for each platform variant.
-declare -A PLATFORM_ARCHS=(
-  [macos]="arm64 x86_64"
-  [ios]="arm64"
-  [ios-simulator]="arm64 x86_64"
-  [tvos]="arm64"
-  [tvos-simulator]="arm64 x86_64"
-  [visionos]="arm64"
-  [visionos-simulator]="arm64"
-)
+platform_min_version() {
+  case "$1" in
+    macos) echo "11.0" ;;
+    ios|ios-simulator) echo "13.0" ;;
+    tvos|tvos-simulator) echo "13.0" ;;
+    visionos|visionos-simulator) echo "1.0" ;;
+    *) return 1 ;;
+  esac
+}
+
+platform_sdk() {
+  case "$1" in
+    macos) echo "macosx" ;;
+    ios) echo "iphoneos" ;;
+    ios-simulator) echo "iphonesimulator" ;;
+    tvos) echo "appletvos" ;;
+    tvos-simulator) echo "appletvsimulator" ;;
+    visionos) echo "xros" ;;
+    visionos-simulator) echo "xrssimulator" ;;
+    *) return 1 ;;
+  esac
+}
+
+platform_archs() {
+  case "$1" in
+    macos) echo "arm64 x86_64" ;;
+    ios) echo "arm64" ;;
+    ios-simulator) echo "arm64 x86_64" ;;
+    tvos) echo "arm64" ;;
+    tvos-simulator) echo "arm64 x86_64" ;;
+    visionos) echo "arm64" ;;
+    visionos-simulator) echo "arm64" ;;
+    *) return 1 ;;
+  esac
+}
+
+is_supported_platform() {
+  local candidate="$1"
+  for platform in "${ALL_PLATFORMS[@]}"; do
+    if [[ "${platform}" == "${candidate}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -80,11 +106,15 @@ clone_ffmpeg() {
 }
 
 platform_to_version_flag() {
-  case "$1" in
-    macos) echo "-mmacosx-version-min=${PLATFORM_MIN_VERSIONS[$1]}" ;;
-    ios|ios-simulator) echo "-mios-version-min=${PLATFORM_MIN_VERSIONS[$1]}" ;;
-    tvos|tvos-simulator) echo "-mtvos-version-min=${PLATFORM_MIN_VERSIONS[$1]}" ;;
-    visionos|visionos-simulator) echo "-mxros-version-min=${PLATFORM_MIN_VERSIONS[$1]}" ;;
+  local platform="$1"
+  local min_version
+  min_version="$(platform_min_version "${platform}")" || return 1
+
+  case "${platform}" in
+    macos) echo "-mmacosx-version-min=${min_version}" ;;
+    ios|ios-simulator) echo "-mios-version-min=${min_version}" ;;
+    tvos|tvos-simulator) echo "-mtvos-version-min=${min_version}" ;;
+    visionos|visionos-simulator) echo "-mxros-version-min=${min_version}" ;;
   esac
 }
 
@@ -93,12 +123,16 @@ build_arch() {
   local platform="$1"
   local arch="$2"
 
-  local sdk="${PLATFORM_SDKS[$platform]}"
+  local sdk
+  sdk="$(platform_sdk "${platform}")" || {
+    echo "error: unknown platform '${platform}'" >&2
+    exit 1
+  }
   local sysroot="$(xcrun --sdk "${sdk}" --show-sdk-path)"
   local cc="$(xcrun --sdk "${sdk}" --find clang)"
   local cxx="$(xcrun --sdk "${sdk}" --find clang++)"
-  local version_flag
-  version_flag="$(platform_to_version_flag "${platform}")"
+  local version_flag=""
+  version_flag="$(platform_to_version_flag "${platform}")" || version_flag=""
 
   local build_dir="${BUILD_ROOT}/${platform}/${arch}/build"
   local install_dir="${BUILD_ROOT}/${platform}/${arch}/install"
@@ -146,7 +180,17 @@ build_arch() {
 
 build_platform() {
   local platform="$1"
-  for arch in ${PLATFORM_ARCHS[$platform]}; do
+  local archs_string
+  local archs=()
+
+  archs_string="$(platform_archs "${platform}")" || {
+    echo "warning: no architectures defined for platform '${platform}'" >&2
+    return
+  }
+
+  IFS=' ' read -r -a archs <<< "${archs_string}"
+
+  for arch in "${archs[@]}"; do
     local log_file="${LOG_DIR}/configure-${platform}-${arch}.log"
     echo "Building FFmpeg for ${platform} (${arch})"
     build_arch "${platform}" "${arch}" > >(tee "${log_file}") 2>&1
@@ -157,7 +201,13 @@ package_library() {
   local library="$1"
   local args=()
   for platform in "${ORDERED_PLATFORMS[@]}"; do
-    for arch in ${PLATFORM_ARCHS[$platform]}; do
+    local archs_string
+    local archs=()
+
+    archs_string="$(platform_archs "${platform}")" || continue
+    IFS=' ' read -r -a archs <<< "${archs_string}"
+
+    for arch in "${archs[@]}"; do
       local install_dir="${BUILD_ROOT}/${platform}/${arch}/install"
       local static_lib="${install_dir}/lib/lib${library}.a"
       local headers_dir="${install_dir}/include"
@@ -226,12 +276,12 @@ main() {
   done
 
   if [[ ${#platforms[@]} -eq 0 ]]; then
-    platforms=(${!PLATFORM_SDKS[@]})
+    platforms=("${ALL_PLATFORMS[@]}")
   fi
 
   ORDERED_PLATFORMS=()
   for platform in "${platforms[@]}"; do
-    if [[ -z "${PLATFORM_SDKS[$platform]:-}" ]]; then
+    if ! is_supported_platform "${platform}"; then
       echo "warning: skipping unknown platform '${platform}'" >&2
       continue
     fi
