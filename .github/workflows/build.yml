@@ -9,20 +9,25 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
-      ffmpeg-ref:
-        description: "FFmpeg git ref or tag to build"
+      ffmpeg-version:
+        description: "FFmpeg version to build (7.0.3, 7.1.2, 8.0, or 'all')"
         required: false
-        default: "n7.0"
+        default: "all"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
-    name: Build and package FFmpeg
+    name: Build FFmpeg ${{ matrix.ffmpeg-version }}
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        ffmpeg-version: ['7.0.3', '7.1.2', '8.0']
     env:
-      FFMPEG_REF: ${{ github.event.inputs.ffmpeg-ref || 'n7.0' }}
+      FFMPEG_REF: n${{ matrix.ffmpeg-version }}
+      FFMPEG_VERSION: ${{ matrix.ffmpeg-version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,13 +57,13 @@ jobs:
       - name: Archive XCFrameworks
         run: |
           mkdir -p build/artifacts
-          tar -czf build/artifacts/ffmpeg-xcframeworks.tar.gz -C Artifacts/xcframeworks .
+          tar -czf build/artifacts/ffmpeg-${{ matrix.ffmpeg-version }}-xcframeworks.tar.gz -C Artifacts/xcframeworks .
 
       - name: Upload XCFrameworks
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-xcframeworks
-          path: build/artifacts/ffmpeg-xcframeworks.tar.gz
+          name: ffmpeg-${{ matrix.ffmpeg-version }}-xcframeworks
+          path: build/artifacts/ffmpeg-${{ matrix.ffmpeg-version }}-xcframeworks.tar.gz
 
       - name: Generate SwiftPM checksums
         run: |
@@ -71,43 +76,88 @@ jobs:
           fi
           for framework in "${frameworks[@]}"; do
             base=$(basename "$framework")
-            zip_path="build/artifacts/${base}.zip"
+            zip_path="build/artifacts/${base}-${{ matrix.ffmpeg-version }}.zip"
             ditto -c -k --sequesterRsrc --keepParent "$framework" "$zip_path"
             checksum=$(swift package compute-checksum "$zip_path")
-            echo "${base}: ${checksum}" | tee "build/checksums/${base}.checksum"
+            echo "${base}: ${checksum}" | tee "build/checksums/${base}-${{ matrix.ffmpeg-version }}.checksum"
           done
 
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-xcframework-checksums
+          name: ffmpeg-${{ matrix.ffmpeg-version }}-checksums
           path: build/checksums/*.checksum
+
+      - name: Upload framework zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.ffmpeg-version }}-zips
+          path: build/artifacts/*.zip
 
   publish:
     name: Publish release artifacts
     needs: build
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
-      - name: Download build artifacts
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ffmpeg-xcframeworks
           path: publish
 
-      - name: Download checksums
-        uses: actions/download-artifact@v4
-        with:
-          name: ffmpeg-xcframework-checksums
-          path: publish
-
-      - name: Create release assets
+      - name: Organize release assets
         run: |
-          ls -R publish
+          mkdir -p release-assets
+          # Move all artifacts to release-assets directory
+          find publish -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.checksum" \) -exec mv {} release-assets/ \;
+          ls -lah release-assets/
 
-      - name: Upload to GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            publish/ffmpeg-xcframeworks.tar.gz
-            publish/*.checksum
+      - name: Create or update tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          for version in 7.0.3 7.1.2 8.0; do
+            tag="ffmpeg-${version}"
+
+            # Delete tag if it exists (locally and remotely)
+            git tag -d "${tag}" 2>/dev/null || true
+            git push origin ":refs/tags/${tag}" 2>/dev/null || true
+
+            # Create new tag
+            git tag -a "${tag}" -m "FFmpeg ${version} XCFramework build"
+            git push origin "${tag}"
+          done
+
+      - name: Create or update releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for version in 7.0.3 7.1.2 8.0; do
+            tag="ffmpeg-${version}"
+
+            # Delete release if it exists
+            gh release delete "${tag}" -y 2>/dev/null || true
+
+            # Create new release
+            gh release create "${tag}" \
+              --title "FFmpeg ${version} XCFrameworks" \
+              --notes "Pre-built XCFrameworks for FFmpeg ${version}
+
+This release includes:
+- Static XCFrameworks for macOS (arm64)
+- All FFmpeg libraries: avcodec, avdevice, avfilter, avformat, avutil, postproc, swresample, swscale
+- SwiftPM checksums for integration
+
+## Usage
+
+Download the frameworks and add them to your project, or use SwiftPM with the checksums provided." \
+              release-assets/ffmpeg-${version}-xcframeworks.tar.gz \
+              release-assets/*-${version}.zip \
+              release-assets/*-${version}.checksum
+          done
