@@ -144,10 +144,9 @@ jobs:
             # Delete release if it exists
             gh release delete "${tag}" -y 2>/dev/null || true
 
-            # Create new release
-            gh release create "${tag}" \
-              --title "FFmpeg ${version} XCFrameworks" \
-              --notes "Pre-built XCFrameworks for FFmpeg ${version}
+            # Create release notes
+            cat > release-notes.md <<'EOF'
+Pre-built XCFrameworks for FFmpeg VERSION_PLACEHOLDER
 
 This release includes:
 - Static XCFrameworks for macOS (arm64)
@@ -156,7 +155,14 @@ This release includes:
 
 ## Usage
 
-Download the frameworks and add them to your project, or use SwiftPM with the checksums provided." \
+Download the frameworks and add them to your project, or use SwiftPM with the checksums provided.
+EOF
+            sed -i.bak "s/VERSION_PLACEHOLDER/${version}/" release-notes.md
+
+            # Create new release
+            gh release create "${tag}" \
+              --title "FFmpeg ${version} XCFrameworks" \
+              --notes-file release-notes.md \
               release-assets/ffmpeg-${version}-xcframeworks.tar.gz \
               release-assets/*-${version}.zip \
               release-assets/*-${version}.checksum
