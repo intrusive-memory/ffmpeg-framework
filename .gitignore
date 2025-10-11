@@ -4,3 +4,5 @@ Artifacts/
 
 # macOS clutter
 .DS_Store
+.build
+.swiftpm
