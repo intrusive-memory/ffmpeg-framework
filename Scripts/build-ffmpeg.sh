@@ -18,6 +18,16 @@ FFMPEG_REPO="${FFMPEG_REPO:-https://github.com/FFmpeg/FFmpeg.git}"
 FFMPEG_REF="${FFMPEG_REF:-n7.0}" # Latest stable tagged release at the time of writing.
 FFMPEG_LIBRARIES=(avcodec avdevice avfilter avformat avutil postproc swresample swscale)
 
+# Extract FFmpeg major version from FFMPEG_REF for version-specific behavior
+get_ffmpeg_major_version() {
+  # Extract version from tags like "n7.0", "n7.1.2", "n8.0"
+  if [[ "${FFMPEG_REF}" =~ ^n([0-9]+) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  else
+    echo "0"
+  fi
+}
+
 # Ordered list of supported platform identifiers.
 ALL_PLATFORMS=(
   macos
@@ -153,6 +163,14 @@ build_arch() {
 
   pushd "${build_dir}" >/dev/null
 
+  # Determine FFmpeg major version and set postproc flag accordingly
+  local ffmpeg_major_version
+  ffmpeg_major_version="$(get_ffmpeg_major_version)"
+  local postproc_flag=""
+  if [[ "${ffmpeg_major_version}" -lt 8 ]]; then
+    postproc_flag="--enable-postproc"
+  fi
+
   PKG_CONFIG_PATH="" \
   PKG_CONFIG_LIBDIR="" \
   "${SOURCE_ROOT}/ffmpeg/configure" \
@@ -175,7 +193,7 @@ build_arch() {
     --enable-avfilter \
     --enable-avformat \
     --enable-avutil \
-    --enable-postproc \
+    ${postproc_flag} \
     --enable-swresample \
     --enable-swscale \
     --extra-cflags="-arch ${arch} -isysroot ${sysroot} ${version_flag}" \
@@ -336,6 +354,17 @@ main() {
 
   ensure_directories
   clone_ffmpeg
+
+  # Adjust libraries list based on FFmpeg version
+  local ffmpeg_major_version
+  ffmpeg_major_version="$(get_ffmpeg_major_version)"
+  if [[ "${ffmpeg_major_version}" -ge 8 ]]; then
+    # Remove postproc from libraries list for FFmpeg 8.0+
+    FFMPEG_LIBRARIES=(avcodec avdevice avfilter avformat avutil swresample swscale)
+    echo "Building FFmpeg ${ffmpeg_major_version}.x (postproc library not available)"
+  else
+    echo "Building FFmpeg ${ffmpeg_major_version}.x (including postproc library)"
+  fi
 
   for platform in "${ORDERED_PLATFORMS[@]}"; do
     build_platform "${platform}" || true
