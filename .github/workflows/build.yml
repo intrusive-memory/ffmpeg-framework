@@ -145,19 +145,18 @@ jobs:
             gh release delete "${tag}" -y 2>/dev/null || true
 
             # Create release notes
-            cat > release-notes.md <<'EOF'
-Pre-built XCFrameworks for FFmpeg VERSION_PLACEHOLDER
+            cat > release-notes.md << NOTES_EOF
+          Pre-built XCFrameworks for FFmpeg ${version}
 
-This release includes:
-- Static XCFrameworks for macOS (arm64)
-- All FFmpeg libraries: avcodec, avdevice, avfilter, avformat, avutil, postproc, swresample, swscale
-- SwiftPM checksums for integration
+          This release includes:
+          - Static XCFrameworks for macOS (arm64)
+          - All FFmpeg libraries: avcodec, avdevice, avfilter, avformat, avutil, postproc, swresample, swscale
+          - SwiftPM checksums for integration
 
-## Usage
+          ## Usage
 
-Download the frameworks and add them to your project, or use SwiftPM with the checksums provided.
-EOF
-            sed -i.bak "s/VERSION_PLACEHOLDER/${version}/" release-notes.md
+          Download the frameworks and add them to your project, or use SwiftPM with the checksums provided.
+          NOTES_EOF
 
             # Create new release
             gh release create "${tag}" \
